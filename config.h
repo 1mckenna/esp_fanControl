@@ -1,8 +1,8 @@
 //Configuration Settings for the ESP FanControl Device
 //These codes are specific to the Fanimation Slinger V2 with DIP switches set to [OFF] [OFF] [ON] [OFF] [ON]
-#define DELETE(ptr) { if (ptr != nullptr) {delete ptr; ptr = nullptr;} }
-//SERIAL LOGGING LEVEL FOR DEBUGGING (default: 1)
-#define FAN_DEBUG_LVL 2
+
+//SERIAL LOGGING LEVEL FOR DEBUGGING (default: 1 max: 3) 
+#define FAN_DEBUG_LVL 1
 // Frequency of Fanimation Slinger V2 Fan Remote
 #define FREQUENCY     304.25
 // RC-switch settings
