@@ -4,7 +4,6 @@ Control and Monitor a Fanimation Slinger V2 RF Fan via an ESP8266 and a TI CC110
 *This code base should work for other fans controlled via RF with small changes to the protocols/codes being sent.*
 
 # Table of Contents
-- [ESP fanControl](#esp-fancontrol)
 - [Features](#features)
 - [ESP8266 Wiring Setup (i.e. Connecting to the TI CC1101)](#esp8266-wiring-setup--ie-connecting-to-the-ti-cc1101-)
 - [Ardunio IDE/VSCode Board Specific Settings Setup](#ardunio-ide-vscode-board-specific-settings-setup)
