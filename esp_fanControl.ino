@@ -5,11 +5,11 @@ ESP8266 CC1101 Wiring: https://github.com/LSatan/SmartRC-CC1101-Driver-Lib/blob/
 */
 
 #include "config.h"
-#include <ELECHOUSE_CC1101_SRC_DRV.h>
-#include <RCSwitch.h>
-#include <ESP8266WiFi.h>
+#include <ELECHOUSE_CC1101_SRC_DRV.h> //for CC1101
+#include <RCSwitch.h> //for CC1101
+#include <ESP8266WiFi.h> //for ESP8266
 #include <PubSubClient.h> //for MQTT
-#include <ArduinoJson.h>
+#include <ArduinoJson.h> //Used for MQTT Autodiscovery Payload Creation
 
 // Set receive and transmit pin numbers (GDO0 and GDO2)
 #ifdef ESP32 // for esp32! Receiver on GPIO pin 4. Transmit on GPIO pin 2.
@@ -25,8 +25,10 @@ ESP8266 CC1101 Wiring: https://github.com/LSatan/SmartRC-CC1101-Driver-Lib/blob/
 
 #define DELETE(ptr) { if (ptr != nullptr) {delete ptr; ptr = nullptr;} }
 
-String INFO_TOPIC = (String)MQTT_BASETOPIC + "/fancontrol_" + String(ESP.getChipId()) + "/info";
-String AVAILABILITY_TOPIC = (String)MQTT_BASETOPIC + "/fancontrol_" + String(ESP.getChipId()) + "/status";
+//MQTT TOPICS
+String INFO_TOPIC = (String)MQTT_BASETOPIC + "/sensor/fancontrol_" + String(ESP.getChipId()) + "/info/attributes";
+String INFO_CONFIG_TOPIC = (String)MQTT_BASETOPIC + "/sensor/fancontrol_" + String(ESP.getChipId()) + "/info/config";
+String AVAILABILITY_TOPIC = (String)MQTT_BASETOPIC + "/sensor/fancontrol_" + String(ESP.getChipId()) + "/status";
 String LIGHT_STATE_TOPIC = (String)MQTT_BASETOPIC + "/light/fancontrol_" + String(ESP.getChipId()) + "/state";
 String LIGHT_COMMAND_TOPIC = (String)MQTT_BASETOPIC + "/light/fancontrol_" + String(ESP.getChipId()) + "/set";
 String LIGHT_CONFIG_TOPIC = (String)MQTT_BASETOPIC + "/light/fancontrol_" + String(ESP.getChipId())+"/config";
@@ -37,7 +39,9 @@ String FAN_PERCENT_COMMAND_TOPIC = (String)MQTT_BASETOPIC + "/fan/fancontrol_" +
 String FAN_MODE_STATE_TOPIC = (String)MQTT_BASETOPIC + "/fan/fancontrol_" + String(ESP.getChipId()) + "/preset/preset_mode_state";
 String FAN_MODE_COMMAND_TOPIC = (String)MQTT_BASETOPIC + "/fan/fancontrol_" + String(ESP.getChipId()) + "/preset_mode";
 String FAN_CONFIG_TOPIC = (String)MQTT_BASETOPIC + "/fan/fancontrol_" + String(ESP.getChipId())+"/config";
-bool SUMMER_MODE = true; //Default Fan state
+
+//Variables used for tracking Fan State
+bool SUMMER_MODE = true;
 bool CURRENT_LIGHT_STATE = false;
 bool CURRENT_FAN_STATE = false;
 int CURRENT_FAN_SPEED = 0;
@@ -49,7 +53,8 @@ WiFiClient *client = nullptr;
 PubSubClient *mqtt_client = nullptr;
 static String deviceStr ="";
 
-
+#pragma region System_Or_Helper_Functions
+//Function for keeping track of system uptime.
 String getSystemUptime()
 {
   long millisecs = millis();
@@ -59,7 +64,7 @@ String getSystemUptime()
   return String(systemUpTimeDy)+"d:"+String(systemUpTimeHr)+"h:"+String(systemUpTimeMn)+"m";
 }
 
-
+//Logging helper function
 void FANCONTORL_LOGGER(String logMsg, int requiredLVL, bool addNewLine)
 {
   if(requiredLVL <= FAN_DEBUG_LVL)
@@ -71,6 +76,94 @@ void FANCONTORL_LOGGER(String logMsg, int requiredLVL, bool addNewLine)
   }
 }
 
+//Toggle LED State
+void toggleLED()
+{
+  digitalWrite(LED_BUILTIN, !digitalRead(LED_BUILTIN));
+}
+
+//Check and validate MQTT is connected and 
+void heartBeatPrint()
+{
+  if(mqtt_client != nullptr) //We have to check and see if we have a mqtt client created
+  {
+    if(!mqtt_client->connected())
+    {
+      FANCONTORL_LOGGER("MQTT Disconnected", 0, true);
+      connectMQTT();
+    }
+  }
+  FANCONTORL_LOGGER(String("free heap memory: ") + String(ESP.getFreeHeap()), 3, true);
+}
+
+//Function to check status of Wifi and MQTT
+void check_status()
+{
+  static ulong checkstatus_timeout  = 0;
+  static ulong LEDstatus_timeout    = 0;
+  static ulong checkwifi_timeout    = 0;
+  static ulong fancontrolheartbeat_timeout = 0;
+  ulong current_millis = millis();
+
+  // Check WiFi every WIFICHECK_INTERVAL (1) seconds.
+  if ((current_millis > checkwifi_timeout) || (checkwifi_timeout == 0))
+  {
+    check_WiFi();
+    mqtt_client->loop();
+    checkwifi_timeout = current_millis + WIFICHECK_INTERVAL;
+  }
+
+  if ((current_millis > LEDstatus_timeout) || (LEDstatus_timeout == 0))
+  {
+    // Toggle LED at LED_INTERVAL = 2s
+    toggleLED();
+    LEDstatus_timeout = current_millis + LED_INTERVAL;
+  }
+  // Print hearbeat every HEARTBEAT_INTERVAL (10) seconds.
+  if ((current_millis > checkstatus_timeout) || (checkstatus_timeout == 0))
+  { 
+    heartBeatPrint();
+    checkstatus_timeout = current_millis + HEARTBEAT_INTERVAL;
+  }
+
+  // Print FanControl System Info every FANCONTROLHEARTBEAT_INTERVAL (5) minutes.
+  if ((current_millis > fancontrolheartbeat_timeout) || (fancontrolheartbeat_timeout == 0))
+  {
+    publishSystemInfo();
+    fancontrolheartbeat_timeout = current_millis + FANCONTROLHEARTBEAT_INTERVAL;
+  }
+}
+#pragma endregion
+#pragma region Wifi_Related_Functions
+void check_WiFi()
+{
+  if ( (WiFi.status() != WL_CONNECTED) )
+  {
+    FANCONTORL_LOGGER("WiFi Connection Lost!",0,true);
+    disconnectMQTT();
+    connectWiFi();
+  }
+}
+
+void connectWiFi() 
+{
+  delay(10);
+  FANCONTORL_LOGGER("Connecting to "+String(WIFI_SSID),0, false);
+  WiFi.begin(WIFI_SSID, WIFI_PASS);
+  while (WiFi.status() != WL_CONNECTED) 
+  {
+    delay(500);
+    FANCONTORL_LOGGER(".",0, false);
+  }
+  FANCONTORL_LOGGER("",0,true);
+  randomSeed(micros());
+  FANCONTORL_LOGGER("WiFi connected",0,true);
+  FANCONTORL_LOGGER("IP: "+ WiFi.localIP().toString(),0,true);
+  
+}
+#pragma endregion
+#pragma region RF_Related_Functions
+//Function used to send the RF Command requested
 void sendRFCommand(int code)
 {
   fanControlClient.disableReceive(); //Turn Off Listening
@@ -104,6 +197,7 @@ void startLearningMode()
   }
 }
 
+//This function is used inside the main loop to listen for codes from the remote while we are awaiting messages from MQTT
 void listenForCodes()
 {
   if(fanControlClient.available())
@@ -151,7 +245,7 @@ void listenForCodes()
     fanControlClient.resetAvailable();
   }
 }
-
+#pragma endregion
 #pragma region MQTT_Related_Functions
 void callback(char* topic, byte* payload, unsigned int length) 
 {
@@ -373,6 +467,7 @@ void mqttAnnounce()
   String syspayload="";
   String lightPayload ="";
   String fanPayload = "";
+  String infoSensorPayload ="";
 
   DynamicJsonDocument deviceJSON(1024);
   JsonObject deviceObj = deviceJSON.createNestedObject("device");
@@ -391,6 +486,15 @@ void mqttAnnounce()
   sysinfoJSON["Signal Strength"] = String(WiFi.RSSI());
   sysinfoJSON["IP Address"] = WiFi.localIP().toString();
   serializeJson(sysinfoJSON,syspayload);
+
+  DynamicJsonDocument infoSensorJSON(1024);
+  infoSensorJSON["device"] = deviceObj;
+  infoSensorJSON["name"] = "fancontrol_" + String(ESP.getChipId()) + " Sensor";
+  infoSensorJSON["icon"] = "mdi:chip";
+  infoSensorJSON["unique_id"] = "fancontrol_" + String(ESP.getChipId())+"_info";
+  infoSensorJSON["state_topic"] = AVAILABILITY_TOPIC;
+  infoSensorJSON["json_attributes_topic"] = INFO_TOPIC;
+  serializeJson(infoSensorJSON,infoSensorPayload);
 
   DynamicJsonDocument lightJSON(1024);
   lightJSON["device"] = deviceObj;
@@ -431,13 +535,15 @@ void mqttAnnounce()
   {
     if(mqtt_client->connected())
     {
+      mqtt_client->publish(AVAILABILITY_TOPIC.c_str(),"online");
+      delay(100);
       mqtt_client->publish(LIGHT_CONFIG_TOPIC.c_str(),lightPayload.c_str(),true);
       delay(100);
       mqtt_client->publish(FAN_CONFIG_TOPIC.c_str(),fanPayload.c_str(),true);
       delay(100);
-      mqtt_client->publish(AVAILABILITY_TOPIC.c_str(),"online");
+      mqtt_client->publish(INFO_CONFIG_TOPIC.c_str(),infoSensorPayload.c_str(),true);
       delay(100);
-      mqtt_client->publish(INFO_TOPIC.c_str(),syspayload.c_str());
+      mqtt_client->publish(INFO_TOPIC.c_str(),syspayload.c_str(),true);
       delay(100);
     }
     else
@@ -449,91 +555,7 @@ void mqttAnnounce()
 
 #pragma endregion
 
-void check_status()
-{
-  static ulong checkstatus_timeout  = 0;
-  static ulong LEDstatus_timeout    = 0;
-  static ulong checkwifi_timeout    = 0;
-  static ulong fancontrolheartbeat_timeout = 0;
-  
-  ulong current_millis = millis();
-
-  // Check WiFi every WIFICHECK_INTERVAL (1) seconds.
-  if ((current_millis > checkwifi_timeout) || (checkwifi_timeout == 0))
-  {
-    check_WiFi();
-    mqtt_client->loop();
-    checkwifi_timeout = current_millis + WIFICHECK_INTERVAL;
-  }
-
-  if ((current_millis > LEDstatus_timeout) || (LEDstatus_timeout == 0))
-  {
-    // Toggle LED at LED_INTERVAL = 2s
-    toggleLED();
-    LEDstatus_timeout = current_millis + LED_INTERVAL;
-  }
-
-  // Print hearbeat every HEARTBEAT_INTERVAL (10) seconds.
-  if ((current_millis > checkstatus_timeout) || (checkstatus_timeout == 0))
-  { 
-    heartBeatPrint();
-    checkstatus_timeout = current_millis + HEARTBEAT_INTERVAL;
-  }
-
-  // Print FanControl System Info every FANCONTROLHEARTBEAT_INTERVAL (5) minutes.
-  if ((current_millis > fancontrolheartbeat_timeout) || (fancontrolheartbeat_timeout == 0))
-  {
-    publishSystemInfo();
-    fancontrolheartbeat_timeout = current_millis + FANCONTROLHEARTBEAT_INTERVAL;
-  }
-}
-
-//Toggle LED State
-void toggleLED()
-{
-  digitalWrite(LED_BUILTIN, !digitalRead(LED_BUILTIN));
-}
-
-void heartBeatPrint()
-{
-  if(mqtt_client != nullptr) //We have to check and see if we have a mqtt client created
-  {
-    if(!mqtt_client->connected())
-    {
-      FANCONTORL_LOGGER("MQTT Disconnected", 0, true);
-      connectMQTT();
-    }
-  }
-  FANCONTORL_LOGGER(String("free heap memory: ") + String(ESP.getFreeHeap()), 3, true);
-}
-
-void check_WiFi()
-{
-  if ( (WiFi.status() != WL_CONNECTED) )
-  {
-    FANCONTORL_LOGGER("WiFi Connection Lost!",0,true);
-    disconnectMQTT();
-    connectWiFi();
-  }
-}
-
-void connectWiFi() 
-{
-  delay(10);
-  FANCONTORL_LOGGER("Connecting to "+String(WIFI_SSID),0, false);
-  WiFi.begin(WIFI_SSID, WIFI_PASS);
-  while (WiFi.status() != WL_CONNECTED) 
-  {
-    delay(500);
-    FANCONTORL_LOGGER(".",0, false);
-  }
-  FANCONTORL_LOGGER("",0,true);
-  randomSeed(micros());
-  FANCONTORL_LOGGER("WiFi connected",0,true);
-  FANCONTORL_LOGGER("IP: "+ WiFi.localIP().toString(),0,true);
-  
-}
-
+//Setup Function
 void setup() 
 {
   //Start Serial Connection
@@ -543,16 +565,15 @@ void setup()
   FANCONTORL_LOGGER("Starting fanControl Client on " + String(ARDUINO_BOARD), 0, true);
   // Initialize the LED digital pin as an output.
   pinMode(LED_BUILTIN, OUTPUT);
-  
   // Check the CC1101 Spi connection is working.
   if (ELECHOUSE_cc1101.getCC1101())
   {
-    FANCONTORL_LOGGER("CC1101 SPI Connection: [OK]", 1, true);
+    FANCONTORL_LOGGER("CC1101 SPI Connection: [OK]", 0, true);
     CC1101_CONNECTED = true;
   }
   else
   {
-    FANCONTORL_LOGGER("CC1101 SPI Connection: [ERR]", 1, true);
+    FANCONTORL_LOGGER("CC1101 SPI Connection: [ERR]", 0, true);
     CC1101_CONNECTED = false;
   }
   //Initialize the CC1101 and Set the Frequency
@@ -565,6 +586,7 @@ void setup()
   connectMQTT();
 }
 
+//Loop Function
 void loop() 
 {
   //Make sure the CC1101 Chip is connected otherwise do nothing
