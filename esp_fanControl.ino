@@ -40,6 +40,9 @@ String FAN_MODE_STATE_TOPIC = (String)MQTT_BASETOPIC + "/fan/fancontrol_" + Stri
 String FAN_MODE_COMMAND_TOPIC = (String)MQTT_BASETOPIC + "/fan/fancontrol_" + String(ESP.getChipId()) + "/preset_mode";
 String FAN_CONFIG_TOPIC = (String)MQTT_BASETOPIC + "/fan/fancontrol_" + String(ESP.getChipId())+"/config";
 
+//Variable to track CC1101 State
+bool CC1101_RX_ON = true;
+
 //Variables used for tracking Fan State
 bool SUMMER_MODE = true;
 bool CURRENT_LIGHT_STATE = false;
@@ -93,7 +96,7 @@ void heartBeatPrint()
       connectMQTT();
     }
   }
-  FANCONTORL_LOGGER(String("free heap memory: ") + String(ESP.getFreeHeap()), 3, true);
+  FANCONTORL_LOGGER(String("free heap memory: ") + String(ESP.getFreeHeap()), 4, true);
 }
 
 //Function to check status of Wifi and MQTT
@@ -167,6 +170,8 @@ void connectWiFi()
 void sendRFCommand(int code)
 {
   fanControlClient.disableReceive(); //Turn Off Listening
+  CC1101_RX_ON = false;
+  FANCONTORL_LOGGER("[RX] RX LISTENING: OFF", 4, true);
   fanControlClient.enableTransmit(TX_PIN); //Enable RF TX                                                  
   ELECHOUSE_cc1101.SetTx();
   FANCONTORL_LOGGER("[TX] Transmitting RF Code " + String(code), 2, true);
@@ -175,17 +180,23 @@ void sendRFCommand(int code)
   fanControlClient.setPulseLength(382);
   fanControlClient.send(code, 24);
   FANCONTORL_LOGGER("[TX] Transmission Complete!", 2, true);
-  fanControlClient.disableTransmit();
-  //Put Device Back in Listening Mode
-  fanControlClient.enableReceive(RX_PIN);
   ELECHOUSE_cc1101.SetRx();
+  fanControlClient.disableTransmit();
+  fanControlClient.enableReceive(RX_PIN);
 }
 
 //Call this function to get the codes for the buttons we want to use
 void startLearningMode()
 {
-  fanControlClient.enableReceive(RX_PIN);
-  ELECHOUSE_cc1101.SetRx();
+  if(!CC1101_RX_ON)
+  {
+    fanControlClient.enableReceive(RX_PIN);
+    ELECHOUSE_cc1101.SetRx();
+    CC1101_RX_ON = true;
+    FANCONTORL_LOGGER("[RX] RX LISTENING: ON", 4, true);
+    fanControlClient.resetAvailable();
+  }
+
   if(fanControlClient.available())
   {
     FANCONTORL_LOGGER("[LEARN] !!! BUTTON PRESS DETECTED !!!", 1, true);
@@ -200,6 +211,15 @@ void startLearningMode()
 //This function is used inside the main loop to listen for codes from the remote while we are awaiting messages from MQTT
 void listenForCodes()
 {
+  if(!CC1101_RX_ON)
+  {
+    fanControlClient.enableReceive(RX_PIN);
+    ELECHOUSE_cc1101.SetRx();
+    CC1101_RX_ON = true;
+    FANCONTORL_LOGGER("[RX] RX LISTENING: ON", 4, true);
+    fanControlClient.resetAvailable();
+  }
+
   if(fanControlClient.available())
   {
     String rxCode = String(fanControlClient.getReceivedValue());
