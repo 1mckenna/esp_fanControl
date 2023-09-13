@@ -500,7 +500,7 @@ void mqttAnnounce()
   
   DynamicJsonDocument sysinfoJSON(1024);
   sysinfoJSON["device"] = deviceObj;
-  sysinfoJSON["name"] = "fancontrol_" + String(ESP.getChipId());
+  sysinfoJSON["name"] = "System Info";
   sysinfoJSON["Uptime"] = getSystemUptime();
   sysinfoJSON["Network"] = WiFi.SSID();
   sysinfoJSON["Signal Strength"] = String(WiFi.RSSI());
@@ -509,7 +509,7 @@ void mqttAnnounce()
 
   DynamicJsonDocument infoSensorJSON(1024);
   infoSensorJSON["device"] = deviceObj;
-  infoSensorJSON["name"] = "fancontrol_" + String(ESP.getChipId()) + " Sensor";
+  infoSensorJSON["name"] = "Connectivity Sensor";
   infoSensorJSON["icon"] = "mdi:chip";
   infoSensorJSON["unique_id"] = "fancontrol_" + String(ESP.getChipId())+"_info";
   infoSensorJSON["state_topic"] = AVAILABILITY_TOPIC;
@@ -518,7 +518,7 @@ void mqttAnnounce()
 
   DynamicJsonDocument lightJSON(1024);
   lightJSON["device"] = deviceObj;
-  lightJSON["name"] = "fancontrol_" + String(ESP.getChipId()) + " Light";
+  lightJSON["name"] = "Light";
   lightJSON["unique_id"]   = "fancontrol_" + String(ESP.getChipId())+"_light";
   lightJSON["state_topic"] = LIGHT_STATE_TOPIC;
   lightJSON["command_topic"] = LIGHT_COMMAND_TOPIC;
@@ -531,7 +531,7 @@ void mqttAnnounce()
   
   DynamicJsonDocument fanJSON(1024);
   fanJSON["device"] = deviceObj;
-  fanJSON["name"] = "fancontrol_" + String(ESP.getChipId()) + " Fan";
+  fanJSON["name"] = "Fan";
   fanJSON["unique_id"]   = "fancontrol_" + String(ESP.getChipId())+"_fan";
   fanJSON["state_topic"] = FAN_STATE_TOPIC;
   fanJSON["command_topic"] = FAN_COMMAND_TOPIC;
