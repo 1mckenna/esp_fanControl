@@ -32,6 +32,8 @@ String AVAILABILITY_TOPIC = (String)MQTT_BASETOPIC + "/sensor/fancontrol_" + Str
 String LIGHT_STATE_TOPIC = (String)MQTT_BASETOPIC + "/light/fancontrol_" + String(ESP.getChipId()) + "/state";
 String LIGHT_COMMAND_TOPIC = (String)MQTT_BASETOPIC + "/light/fancontrol_" + String(ESP.getChipId()) + "/set";
 String LIGHT_CONFIG_TOPIC = (String)MQTT_BASETOPIC + "/light/fancontrol_" + String(ESP.getChipId())+"/config";
+String LIGHT_BRIGHTNESS_STATE_TOPIC = (String)MQTT_BASETOPIC + "/light/fancontrol_" + String(ESP.getChipId()) +"/brightness/percentage_state";
+String LIGHT_BRIGHTNESS_COMMAND_TOPIC = (String)MQTT_BASETOPIC + "/light/fancontrol_" + String(ESP.getChipId()) + "/brightness/percentage";
 String FAN_STATE_TOPIC = (String)MQTT_BASETOPIC + "/fan/fancontrol_" + String(ESP.getChipId()) + "/state";
 String FAN_COMMAND_TOPIC = (String)MQTT_BASETOPIC + "/fan/fancontrol_" + String(ESP.getChipId()) + "/set";
 String FAN_PERCENT_STATE_TOPIC = (String)MQTT_BASETOPIC + "/fan/fancontrol_" + String(ESP.getChipId()) +"/speed/percentage_state";
@@ -48,6 +50,7 @@ bool SUMMER_MODE = true;
 bool CURRENT_LIGHT_STATE = false;
 bool CURRENT_FAN_STATE = false;
 int CURRENT_FAN_SPEED = 0;
+int CURRENT_LIGHT_BRIGHTNESS = 0;
 
 bool CC1101_CONNECTED = false;
 RCSwitch fanControlClient = RCSwitch();
@@ -241,7 +244,11 @@ void listenForCodes()
       mqtt_client->publish(FAN_MODE_STATE_TOPIC.c_str(),"Winter",true);
     }
     else if( rxCode.toInt() >= LIGHT_MIN  && rxCode.toInt() <= LIGHT_MAX )
+    {
       mqtt_client->publish(LIGHT_STATE_TOPIC.c_str(),"on",true);
+      int brightness = rxCode.toInt() - LIGHT_MIN;
+      mqtt_client->publish(LIGHT_BRIGHTNESS_STATE_TOPIC.c_str(),String(brightness).c_str(),true);
+    }
     else if( rxCode.toInt() >= SUMMER_FAN_MIN  && rxCode.toInt() <= SUMMER_FAN_MAX )
     {
       mqtt_client->publish(FAN_STATE_TOPIC.c_str(),"on",true);
@@ -289,6 +296,10 @@ void callback(char* topic, byte* payload, unsigned int length)
     else if(payloadStr == "off" )
       CURRENT_LIGHT_STATE = false;
   }
+  else if( String(topic) == LIGHT_BRIGHTNESS_STATE_TOPIC )
+  {
+    CURRENT_LIGHT_BRIGHTNESS = payloadStr.toInt();
+  }
   else if( String(topic) == FAN_PERCENT_STATE_TOPIC )
   {
     CURRENT_FAN_SPEED = payloadStr.toInt();
@@ -308,7 +319,8 @@ void callback(char* topic, byte* payload, unsigned int length)
   {
     if(payloadStr == "on")
     {
-      sendRFCommand(LIGHT_ON);
+      if(CURRENT_LIGHT_STATE == false)
+        sendRFCommand(LIGHT_ON);
       mqtt_client->publish(LIGHT_STATE_TOPIC.c_str(),"on",true);
     }
     if(payloadStr == "off")
@@ -316,6 +328,13 @@ void callback(char* topic, byte* payload, unsigned int length)
       sendRFCommand(LIGHT_OFF);
       mqtt_client->publish(LIGHT_STATE_TOPIC.c_str(),"off",true);
     }
+  }
+  else if( String(topic) == LIGHT_BRIGHTNESS_COMMAND_TOPIC )
+  {
+    int brightness = payloadStr.toInt();
+    int txCode = LIGHT_MIN + brightness;
+    sendRFCommand(txCode);
+    mqtt_client->publish(LIGHT_BRIGHTNESS_STATE_TOPIC.c_str(),payloadStr.c_str(),true);
   }
   else if(String(topic) == FAN_COMMAND_TOPIC )
   {
@@ -430,6 +449,12 @@ void connectMQTT()
     mqtt_client->subscribe(LIGHT_COMMAND_TOPIC.c_str());
     mqtt_client->loop();
     mqtt_client->loop();
+    mqtt_client->subscribe(LIGHT_BRIGHTNESS_STATE_TOPIC.c_str());
+    mqtt_client->loop();
+    mqtt_client->loop();
+    mqtt_client->subscribe(LIGHT_BRIGHTNESS_COMMAND_TOPIC.c_str());
+    mqtt_client->loop();
+    mqtt_client->loop();
     mqtt_client->subscribe(FAN_STATE_TOPIC.c_str());
     mqtt_client->loop();
     mqtt_client->loop();
@@ -471,6 +496,7 @@ void publishSystemInfo()
         FANCONTORL_LOGGER("[FAN]: ON",3,true);
       else
         FANCONTORL_LOGGER("[FAN]: OFF",3,true);
+      FANCONTORL_LOGGER("[BRIGHTNESS]: "+String(CURRENT_LIGHT_BRIGHTNESS),2,true);
       FANCONTORL_LOGGER("[SPEED]: "+String(CURRENT_FAN_SPEED),2,true);
       mqttAnnounce();
     }
@@ -524,6 +550,10 @@ void mqttAnnounce()
   lightJSON["command_topic"] = LIGHT_COMMAND_TOPIC;
   lightJSON["payload_on"] = "on";
   lightJSON["payload_off"] = "off";
+  lightJSON["brightness"] = true;
+  lightJSON["brightness_state_topic"] = LIGHT_BRIGHTNESS_STATE_TOPIC;
+  lightJSON["brightness_command_topic"] = LIGHT_BRIGHTNESS_COMMAND_TOPIC;
+  lightJSON["brightness_scale"] = LIGHT_MAX - LIGHT_MIN;
   lightJSON["availability_topic"] = AVAILABILITY_TOPIC;
   lightJSON["payload_available"] = "online";
   lightJSON["payload_not_available"] = "offline";
